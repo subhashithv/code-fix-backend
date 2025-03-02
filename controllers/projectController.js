@@ -1,20 +1,24 @@
 const fs = require('fs');
 const path = require('path');
 const simpleGit = require('simple-git');
+const Project = require('../models/project');
 const { GeminiClient } = require('../utils/geminiClient');
 
 const REPOS_DIR = path.join(__dirname, '../repos');
 
-// Clone repository
-exports.cloneRepo = async (req, res) => {
-    const { repoUrl } = req.body;
+// Clone and Create Project
+exports.cloneProject = async (req, res) => {
+    const { repoUrl, title, description, tasks = [] } = req.body;
 
-    if (!repoUrl) {
-        return res.status(400).json({ error: 'Repository URL is required' });
+    if (!repoUrl || !title) {
+        return res.status(400).json({ error: 'Repository URL and project title are required' });
     }
 
     const repoName = repoUrl.split('/').pop().replace('.git', '');
     const repoPath = path.join(REPOS_DIR, repoName);
+
+    console.log('Cloning Repo:', repoUrl);
+    console.log('Repo Name:', repoName);
 
     if (fs.existsSync(repoPath)) {
         fs.rmSync(repoPath, { recursive: true, force: true });
@@ -37,110 +41,104 @@ exports.cloneRepo = async (req, res) => {
                 }
             }
         }
-
         listFiles(repoPath);
-        res.status(200).json({ message: 'Repository cloned successfully', files });
+
+        // Create project entry in MongoDB
+        const project = new Project({
+            title,
+            description,
+            tasks,
+            prompt: '',
+            response: '',
+            tokenCount: 0,
+            debuggedResult: '',
+            repoName,
+            files
+        });
+
+        await project.save();
+
+        res.status(200).json({ message: 'Repository cloned and project created successfully', project });
     } catch (error) {
         res.status(500).json({ error: 'Failed to clone repository', details: error.message });
     }
 };
 
-// Get file content
-exports.getFileContent = async (req, res) => {
-    const { repoName, filePath } = req.body;
-
-    if (!repoName || !filePath) {
-        return res.status(400).json({ error: 'Repository name and file path are required' });
-    }
-
-    const fullPath = path.join(REPOS_DIR, repoName, filePath);
-
-    if (!fs.existsSync(fullPath)) {
-        return res.status(404).json({ error: 'File not found' });
-    }
-
-    try {
-        const content = fs.readFileSync(fullPath, 'utf8');
-        res.status(200).json({ content });
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to read file', details: error.message });
-    }
-};
-
-// Debug file content using Gemini
-exports.debugFile = async (req, res) => {
-    const { fileContent } = req.body;
-
-    if (!fileContent) {
-        return res.status(400).json({ error: 'File content is required for debugging' });
-    }
-
-    const prompt = `Act as a code debugger. Analyze the following code for issues and suggest fixes. Code: ${fileContent}`;
-
-    try {
-        const debuggedResult = await GeminiClient.callGemini(prompt);
-        res.status(200).json({ debuggedResult });
-    } catch (error) {
-        res.status(500).json({ error: 'Failed to debug file', details: error.message });
-    }
-};
-
-// Combined analyze file (fetch + debug automatically)
+// Analyze file content using Gemini
 exports.analyzeFile = async (req, res) => {
-    const { repoName, filePath } = req.body;
+    const { projectId, filePath } = req.body;
 
-    if (!repoName || !filePath) {
-        return res.status(400).json({ error: 'Repository name and file path are required' });
+    if (!projectId || !filePath) {
+        return res.status(400).json({ error: 'Project ID and file path are required' });
     }
 
-    const fullPath = path.join(REPOS_DIR, repoName, filePath);
+    const project = await Project.findById(projectId);
+    if (!project) {
+        return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const repoPath = path.join(REPOS_DIR, project.repoName);
+    const fullPath = path.join(repoPath, filePath);
 
     if (!fs.existsSync(fullPath)) {
-        return res.status(404).json({ error: `File not found at path: ${fullPath}` });
+        return res.status(404).json({ error: `File not found: ${filePath}` });
     }
 
     try {
         const fileContent = fs.readFileSync(fullPath, 'utf8');
-        const prompt = `Act as a code debugger. Analyze the following code for issues and suggest fixes. Code: ${fileContent}`;
+        const prompt = `Act as a code debugger. Analyze the following code for issues and suggest fixes:\n\n${fileContent}`;
         const debuggedResult = await GeminiClient.callGemini(prompt);
+
+        project.debuggedResult = debuggedResult;
+        await project.save();
 
         res.status(200).json({ fileContent, debuggedResult });
     } catch (error) {
         res.status(500).json({ error: 'Failed to analyze file', details: error.message });
     }
 };
-// Get all cloned repositories (projects)
+
+// Get all projects
 exports.getAllProjects = async (req, res) => {
     try {
-        if (!fs.existsSync(REPOS_DIR)) {
-            return res.status(200).json({ projects: [] });
-        }
-
-        const projects = fs.readdirSync(REPOS_DIR)
-            .filter(file => fs.statSync(path.join(REPOS_DIR, file)).isDirectory());
-
-        res.status(200).json({ projects });
+        const projects = await Project.find();
+        res.status(200).json(projects);
     } catch (error) {
         res.status(500).json({ error: 'Failed to fetch projects', details: error.message });
     }
 };
-// Delete a specific project (repository)
-exports.deleteProject = async (req, res) => {
-    const { repoName } = req.body;
 
-    if (!repoName) {
-        return res.status(400).json({ error: 'Repository name is required' });
-    }
-
-    const repoPath = path.join(REPOS_DIR, repoName);
-
-    if (!fs.existsSync(repoPath)) {
-        return res.status(404).json({ error: 'Repository not found' });
-    }
+// Get single project by ID
+exports.getProjectById = async (req, res) => {
+    const { id } = req.params;
 
     try {
-        fs.rmSync(repoPath, { recursive: true, force: true });
-        res.status(200).json({ message: `Repository '${repoName}' deleted successfully` });
+        const project = await Project.findById(id);
+        if (!project) {
+            return res.status(404).json({ error: 'Project not found' });
+        }
+        res.status(200).json(project);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch project', details: error.message });
+    }
+};
+
+// Delete project by ID
+exports.deleteProject = async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const project = await Project.findByIdAndDelete(id);
+        if (!project) {
+            return res.status(404).json({ error: 'Project not found' });
+        }
+
+        const repoPath = path.join(REPOS_DIR, project.repoName);
+        if (fs.existsSync(repoPath)) {
+            fs.rmSync(repoPath, { recursive: true, force: true });
+        }
+
+        res.status(200).json({ message: 'Project deleted successfully' });
     } catch (error) {
         res.status(500).json({ error: 'Failed to delete project', details: error.message });
     }

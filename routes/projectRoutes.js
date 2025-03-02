@@ -2,9 +2,11 @@ const express = require('express');
 const router = express.Router();
 const projectController = require('../controllers/projectController');
 
-router.post('/clone-repo', projectController.cloneRepo);
-router.post('/get-file-content', projectController.getFileContent);
-router.post('/debug-file', projectController.debugFile);
-router.post('/analyze-file', projectController.analyzeFile);   // NEW Combined Route
+// Project CRUD and Analysis routes
+router.post('/clone', projectController.cloneProject);                // Clone repo + create project
+router.post('/analyze-file', projectController.analyzeFile);          // Analyze file in project
+router.get('/', projectController.getAllProjects);                    // Get all projects
+router.get('/:id', projectController.getProjectById);                  // Get project by ID
+router.delete('/:id', projectController.deleteProject);                // Delete project by ID
 
 module.exports = router;

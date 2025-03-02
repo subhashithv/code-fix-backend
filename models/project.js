@@ -7,7 +7,9 @@ const projectSchema = new mongoose.Schema({
     prompt: String,
     response: String,
     tokenCount: Number,
-    debuggedResult: String
+    debuggedResult: String,
+    repoName: String,     // NEW: to store repo folder name
+    files: [String]       // NEW: list of all files in repo
 });
 
 module.exports = mongoose.model('Project', projectSchema);
