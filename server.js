@@ -23,7 +23,7 @@ app.use('/api', healthRoutes);  // Add health route
 // Cron job to check health every 4 minutes
 cron.schedule('*/4 * * * *', async () => {
     try {
-        const response = await axios.get(`http://localhost:${PORT}/api/health`);
+        const response = await axios.get(`https://code-fix-backend.onrender.com/api/health`);
         console.log(`Health Check: ${response.data.status} at ${response.data.timestamp}`);
     } catch (error) {
         console.error('Health check failed:', error.message);
