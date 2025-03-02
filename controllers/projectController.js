@@ -109,3 +109,39 @@ exports.analyzeFile = async (req, res) => {
         res.status(500).json({ error: 'Failed to analyze file', details: error.message });
     }
 };
+// Get all cloned repositories (projects)
+exports.getAllProjects = async (req, res) => {
+    try {
+        if (!fs.existsSync(REPOS_DIR)) {
+            return res.status(200).json({ projects: [] });
+        }
+
+        const projects = fs.readdirSync(REPOS_DIR)
+            .filter(file => fs.statSync(path.join(REPOS_DIR, file)).isDirectory());
+
+        res.status(200).json({ projects });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to fetch projects', details: error.message });
+    }
+};
+// Delete a specific project (repository)
+exports.deleteProject = async (req, res) => {
+    const { repoName } = req.body;
+
+    if (!repoName) {
+        return res.status(400).json({ error: 'Repository name is required' });
+    }
+
+    const repoPath = path.join(REPOS_DIR, repoName);
+
+    if (!fs.existsSync(repoPath)) {
+        return res.status(404).json({ error: 'Repository not found' });
+    }
+
+    try {
+        fs.rmSync(repoPath, { recursive: true, force: true });
+        res.status(200).json({ message: `Repository '${repoName}' deleted successfully` });
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to delete project', details: error.message });
+    }
+};
